@@ -17,6 +17,7 @@ class TurtleService {
         angle: 0, // In Grad, 0 ist nach rechts
         isPenDown: true,
         color: 'black',
+        animationSpeed: 5, // Geschwindigkeit der Animation: 1 (langsam) bis 10 (schnell), 0 für sofort
     };
 
     constructor() {
@@ -37,7 +38,6 @@ class TurtleService {
             console.error('Pyodide instance not available.');
             return;
         }
-
         // Erstelle JavaScript-Funktionen, die von Python aufgerufen werden können
         (globalThis as any).js_turtle_forward = (distance: number) => this.forward(distance);
         (globalThis as any).js_turtle_backward = (distance: number) => this.backward(distance);
@@ -48,6 +48,8 @@ class TurtleService {
         (globalThis as any).js_turtle_goto = (x: number, y: number) => this.goto(x, y);
         (globalThis as any).js_turtle_pencolor = (color: string) => this.pencolor(color);
         (globalThis as any).js_turtle_setheading = (angle: number) => this.setheading(angle);
+        (globalThis as any).js_turtle_speed = (speed: number) => this.setAnimationSpeed(speed);
+
 
 
         // Definiere das Python Turtle-Modul, das diese JavaScript-Funktionen aufruft
@@ -87,6 +89,9 @@ class Turtle:
 
     def setheading(self, to_angle):
         js.js_turtle_setheading(to_angle)
+        
+    def speed(self, speed_val):
+        js.js_turtle_speed(speed_val)
 
     # Aliase
     fd = forward
@@ -126,6 +131,9 @@ def pencolor(color_string):
 
 def setheading(to_angle):
     _turtle_instance.setheading(to_angle)
+
+def speed(speed_val):
+    _turtle_instance.speed(speed_val)
 
 # Aliase für die globalen Funktionen
 fd = forward
@@ -249,6 +257,7 @@ print("Python turtle module successfully imported in Pyodide.")
             angle: 0,
             isPenDown: true,
             color: 'black',
+            animationSpeed: this.turtleState.animationSpeed, // Animation speed beibehalten
         };
         this.executeDrawCommand({ command: 'clear', args: [] }); // Canvas leeren
         this.executeDrawCommand({ command: 'moveTo', args: [0, 0] }); // Turtle zur Startposition
@@ -257,6 +266,15 @@ print("Python turtle module successfully imported in Pyodide.")
 
     public getTurtleState() {
         return { ...this.turtleState };
+    }
+
+    public setAnimationSpeed(speed: number): void {
+        console.log(`TurtleService: setAnimationSpeed(${speed})`);
+        // Begrenze Speed auf gültigen Bereich (0-10)
+        const validSpeed = Math.max(0, Math.min(10, speed));
+        this.turtleState.animationSpeed = validSpeed;
+        // Sende Animationsgeschwindigkeitsbefehl an die Canvas
+        this.executeDrawCommand({ command: 'animationSpeed', args: [validSpeed] });
     }
 }
 

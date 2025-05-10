@@ -1,41 +1,83 @@
 <template>
   <div class="main-application-view">
-    <div class="editor-pane">
-      <h3>Python Code</h3>
-      <textarea v-model="pythonCode" rows="10" placeholder="Python Turtle Code hier eingeben..."></textarea>
-      <!-- Ersetze textarea später durch die tatsächliche CodeEditor-Komponente -->
-      <!-- <CodeEditor ref="codeEditorRef" /> -->
-      <button @click="runCode" :disabled="isLoadingRuntime || isExecuting">
-        {{ isLoadingRuntime ? 'Lade Python...' : (isExecuting ? 'Führe aus...' : 'Code ausführen') }}
-      </button>
-      <button @click="resetCanvas" :disabled="isLoadingRuntime || isExecuting">Canvas zurücksetzen</button>
-      <p v-if="isLoadingRuntime">Initialisiere Python-Runtime und Turtle-Modul...</p>
-      <p v-if="errorLoadingRuntime" class="error-message">Fehler beim Laden der Runtime: {{ errorLoadingRuntime }}</p>
-      <p v-if="errorExecutingCode" class="error-message">Fehler bei der Code-Ausführung: {{ errorExecutingCode }}</p>
+    <div class="left-panel">
+      <div class="tabs">
+        <button
+          :class="['tab-button', { active: activeTab === 'editor' }]"
+          @click="activeTab = 'editor'"
+        >
+          Editor
+        </button>
+        <button
+          :class="['tab-button', { active: activeTab === 'gallery' }]"
+          @click="activeTab = 'gallery'"
+        >
+          Galerie
+        </button>
+      </div>
+
+      <div v-if="activeTab === 'editor'" class="editor-pane">
+        <h3>Python Code</h3>
+        <CodeEditor v-model="pythonCode" language="python" class="code-editor-component" />
+        <div class="execution-status" v-if="executionStatus">
+          <div :class="['status-message', executionStatus.type]">
+            <span class="status-icon">{{ executionStatus.type === 'error' ? '❌' : '✅' }}</span>
+            <span>{{ executionStatus.message }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="activeTab === 'gallery'" class="gallery-pane">
+        <ExampleGallery @load-example="loadExampleCode" />
+      </div>
     </div>
-    <div class="canvas-pane">
-      <TurtleCanvas ref="turtleCanvasRef" />
+
+    <div class="right-panel">
+      <div class="canvas-pane">
+        <TurtleCanvas ref="turtleCanvasRef" />
+      </div>
+      <div class="controls-pane">
+        <ControlPanel
+          :is-executing="isExecuting"
+          :is-step-mode="executionMode === 'step'"
+          :execution-status="executionStatus"
+          @run-code="runCode"
+          @reset-canvas="resetCanvas"
+          @stop-execution="stopExecution"
+          @update-animation-speed="updateAnimationSpeed"
+          @change-execution-mode="changeExecutionMode"
+          @next-step="executeNextStep"
+        />
+      </div>
     </div>
-    <div class="controls-pane">
-      <ControlPanel @run-code="runCode" @reset-canvas="resetCanvas" />
-      <!-- ControlPanel kann Events für run und reset auslösen -->
+
+    <div v-if="isLoadingRuntime" class="loading-overlay">
+      <div class="loading-content">
+        <div class="spinner"></div>
+        <p>Initialisiere Python-Runtime und Turtle-Modul...</p>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
-// import CodeEditor from '@/components/editor/CodeEditor.vue'; // Wird später richtig integriert
+import { ref, onMounted, computed } from 'vue';
+import CodeEditor from '@/components/editor/CodeEditor.vue';
 import TurtleCanvas from '@/components/turtle/TurtleCanvas.vue';
 import ControlPanel from '@/components/controls/ControlPanel.vue';
+import ExampleGallery from '@/components/gallery/ExampleGallery.vue';
 import pythonRuntimeService from '@/services/PythonRuntimeService';
 import turtleService from '@/services/TurtleService';
 
 // Refs für Komponenten
-// const codeEditorRef = ref<InstanceType<typeof CodeEditor> | null>(null); // Für den echten Editor
 const turtleCanvasRef = ref<InstanceType<typeof TurtleCanvas> | null>(null);
 
-// Zustand
+// UI-Zustand
+const activeTab = ref<'editor' | 'gallery'>('editor');
+const animationSpeed = ref(5);
+const executionMode = ref<'normal' | 'step'>('normal');
+
+// Ausführungszustand
 const pythonCode = ref(`import turtle
 
 # Zeichne ein Quadrat
@@ -56,18 +98,47 @@ turtle.circle(30)
 `); // Beispielcode
 const isLoadingRuntime = ref(true);
 const isExecuting = ref(false);
+const isExecutionPaused = ref(false);
+const currentStepIndex = ref(0);
+const totalSteps = ref(0);
+const executionSteps = ref<string[]>([]);
+
+// Status und Fehlerhandling
 const errorLoadingRuntime = ref<string | null>(null);
 const errorExecutingCode = ref<string | null>(null);
+
+// Berechneter Eigenschaftswert für den Ausführungsstatus
+const executionStatus = computed(() => {
+  if (errorExecutingCode.value) {
+    return {
+      type: 'error' as const,
+      message: errorExecutingCode.value
+    };
+  }
+  
+  if (isExecuting.value) {
+    return {
+      type: 'info' as const,
+      message: executionMode.value === 'step'
+        ? `Schrittweise Ausführung: Schritt ${currentStepIndex.value} von ${totalSteps.value}`
+        : 'Code wird ausgeführt...'
+    };
+  }
+  
+  return null;
+});
 
 onMounted(async () => {
   try {
     console.log('MainApplicationView: Mounting. Initializing Python Runtime...');
     await pythonRuntimeService.initialize();
     console.log('MainApplicationView: Python Runtime initialized. Initializing Turtle Service...');
-    // Turtle Service wird nun intern von PythonRuntimeService initialisiert, wenn Pyodide bereit ist.
-    // await turtleService.initialize(pythonRuntimeService.getPyodideInstance()); // Nicht mehr nötig, da TurtleService `ready` Event von PRS nutzt
     isLoadingRuntime.value = false;
-    console.log('MainApplicationView: Python Runtime and Turtle Service should be ready.');
+    
+    // Animation-Geschwindigkeit setzen
+    turtleService.setAnimationSpeed(animationSpeed.value);
+    
+    console.log('MainApplicationView: Python Runtime and Turtle Service ready.');
   } catch (error) {
     console.error('Fehler beim Initialisieren der Services:', error);
     errorLoadingRuntime.value = (error as Error).message || 'Unbekannter Fehler beim Initialisieren.';
@@ -75,15 +146,19 @@ onMounted(async () => {
   }
 });
 
-async function runCode() {
+// Grundlegende Funktionen
+async function runCode(options?: { mode?: 'normal' | 'step' }) {
   if (isLoadingRuntime.value || isExecuting.value) return;
 
-  // const codeToRun = codeEditorRef.value?.getCode(); // Wenn CodeEditor eine getCode Methode hat
-  const codeToRun = pythonCode.value; // Nimmt Code aus der Textarea
-
+  const codeToRun = pythonCode.value;
   if (!codeToRun) {
     errorExecutingCode.value = 'Kein Code zum Ausführen vorhanden.';
     return;
+  }
+
+  // Ausführungsmodus setzen
+  if (options?.mode) {
+    executionMode.value = options.mode;
   }
 
   isExecuting.value = true;
@@ -91,23 +166,82 @@ async function runCode() {
   turtleCanvasRef.value?.reset(); // Canvas vor jeder Ausführung zurücksetzen
 
   try {
-    console.log('MainApplicationView: Executing Python code...');
-    const result = await pythonRuntimeService.runPythonCode(codeToRun);
-    console.log('MainApplicationView: Python code execution result:', result);
-    // Ergebnisbehandlung (z.B. Ausgabe in einer Konsole)
+    console.log(`MainApplicationView: Executing Python code in ${executionMode.value} mode...`);
+    
+    if (executionMode.value === 'step') {
+      // Code in Schritte aufteilen und den ersten Schritt ausführen
+      executionSteps.value = codeToRun.split('\n').filter(line => line.trim() !== '');
+      totalSteps.value = executionSteps.value.length;
+      currentStepIndex.value = 0;
+      await executeNextStep();
+    } else {
+      // Normaler Ausführungsmodus
+      const result = await pythonRuntimeService.runPythonCode(codeToRun);
+      console.log('MainApplicationView: Python code execution result:', result);
+    }
   } catch (error) {
     console.error('Fehler bei der Code-Ausführung:', error);
     errorExecutingCode.value = (error as Error).message || 'Unbekannter Fehler bei der Code-Ausführung.';
   } finally {
-    isExecuting.value = false;
+    if (executionMode.value !== 'step') {
+      isExecuting.value = false;
+    }
   }
 }
 
 function resetCanvas() {
   turtleCanvasRef.value?.reset();
-  // Optional: Turtle-Zustand im Service auch zurücksetzen, falls notwendig
-  // turtleService.reset(); // Bereits in TurtleCanvas.reset() enthalten
-  errorExecutingCode.value = null; // Fehler bei der Codeausführung zurücksetzen
+  errorExecutingCode.value = null;
+}
+
+// Erweiterte Funktionen
+async function executeNextStep() {
+  if (currentStepIndex.value >= executionSteps.value.length) {
+    isExecuting.value = false;
+    return;
+  }
+
+  try {
+    const step = executionSteps.value[currentStepIndex.value];
+    await pythonRuntimeService.runPythonCode(step);
+    currentStepIndex.value++;
+    
+    // Prüfen, ob wir am Ende angelangt sind
+    if (currentStepIndex.value >= executionSteps.value.length) {
+      isExecuting.value = false;
+    }
+  } catch (error) {
+    console.error('Fehler bei der schrittweisen Ausführung:', error);
+    errorExecutingCode.value = (error as Error).message || 'Fehler bei der schrittweisen Ausführung.';
+    isExecuting.value = false;
+  }
+}
+
+function stopExecution() {
+  if (!isExecuting.value) return;
+  
+  isExecuting.value = false;
+  if (executionMode.value === 'step') {
+    currentStepIndex.value = 0;
+    totalSteps.value = 0;
+    executionSteps.value = [];
+  }
+  // TODO: Implementiere eine echte Stopp-Funktionalität für die Python-Ausführung,
+  // falls die laufende Ausführung tatsächlich unterbrochen werden kann
+}
+
+function updateAnimationSpeed(speed: number) {
+  animationSpeed.value = speed;
+  turtleService.setAnimationSpeed(speed);
+}
+
+function changeExecutionMode(mode: 'normal' | 'step') {
+  executionMode.value = mode;
+}
+
+function loadExampleCode(code: string) {
+  pythonCode.value = code;
+  activeTab.value = 'editor'; // Wechsel zum Editor nach Laden eines Beispiels
 }
 
 </script>
@@ -129,14 +263,11 @@ function resetCanvas() {
   overflow-y: auto;
 }
 
-.editor-pane textarea {
+.code-editor-component {
   width: 100%;
   flex-grow: 1;
   margin-bottom: 10px;
-  border: 1px solid #ced4da;
-  border-radius: 4px;
-  padding: 8px;
-  font-family: monospace;
+  /* Stile werden von der CodeEditor Komponente selbst gehandhabt oder hier angepasst */
 }
 
 .editor-pane button {
