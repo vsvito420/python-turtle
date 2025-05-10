@@ -20,40 +20,83 @@ class TurtleService {
         animationSpeed: 5, // Geschwindigkeit der Animation: 1 (langsam) bis 10 (schnell), 0 für sofort
     };
 
+    // Cache-Keys für das Turtle-Modul
+    private TURTLE_MODULE_CACHE_KEY = 'turtle-module-v1';
+    private isInitializing: boolean = false;
+    private initPromise: Promise<void> | null = null;
+
     constructor() {
         // Initialisiere die Turtle-Schnittstelle in Python, sobald Pyodide bereit ist
         this.initializePythonTurtleInterface();
     }
 
+    // Cache-Funktionen für das Turtle-Modul
+    private checkTurtleModuleCache(): boolean {
+        try {
+            const cacheItem = localStorage.getItem(this.TURTLE_MODULE_CACHE_KEY);
+            return !!cacheItem;
+        } catch (error: any) {
+            console.warn('Could not access localStorage for Turtle module cache:', error);
+            return false;
+        }
+    }
+
+    private cacheTurtleModule(): void {
+        try {
+            localStorage.setItem(this.TURTLE_MODULE_CACHE_KEY, 'cached');
+            console.log('Turtle module cached successfully.');
+        } catch (error: any) {
+            console.warn('Could not cache Turtle module:', error);
+        }
+    }
+
+    public clearCache(): void {
+        try {
+            localStorage.removeItem(this.TURTLE_MODULE_CACHE_KEY);
+            console.log('Turtle module cache cleared.');
+        } catch (error: any) {
+            console.warn('Could not clear Turtle module cache:', error);
+        }
+    }
+
     private async initializePythonTurtleInterface() {
-        await pythonRuntimeService.initialize(); // Stelle sicher, dass Pyodide geladen ist
-
-        if (!pythonRuntimeService.isReady()) {
-            console.error('Pyodide not ready, cannot initialize Python Turtle interface.');
+        // Verhindere parallele Initialisierungen
+        if (this.isInitializing) {
+            if (this.initPromise) {
+                return this.initPromise;
+            }
             return;
         }
 
-        const pyodide = pythonRuntimeService.getPyodide();
-        if (!pyodide) {
-            console.error('Pyodide instance not available.');
-            return;
-        }
-        // Erstelle JavaScript-Funktionen, die von Python aufgerufen werden können
-        (globalThis as any).js_turtle_forward = (distance: number) => this.forward(distance);
-        (globalThis as any).js_turtle_backward = (distance: number) => this.backward(distance);
-        (globalThis as any).js_turtle_left = (angle: number) => this.left(angle);
-        (globalThis as any).js_turtle_right = (angle: number) => this.right(angle);
-        (globalThis as any).js_turtle_penup = () => this.penup();
-        (globalThis as any).js_turtle_pendown = () => this.pendown();
-        (globalThis as any).js_turtle_goto = (x: number, y: number) => this.goto(x, y);
-        (globalThis as any).js_turtle_pencolor = (color: string) => this.pencolor(color);
-        (globalThis as any).js_turtle_setheading = (angle: number) => this.setheading(angle);
-        (globalThis as any).js_turtle_speed = (speed: number) => this.setAnimationSpeed(speed);
+        this.isInitializing = true;
+        this.initPromise = new Promise<void>(async (resolve, reject) => {
+            try {
+                // Stelle sicher, dass Pyodide geladen ist (nutzt jetzt die optimierte lazy-loading Funktion)
+                await pythonRuntimeService.initialize();
 
+                if (!pythonRuntimeService.isReady()) {
+                    throw new Error('Pyodide is not ready, cannot initialize Python Turtle interface.');
+                }
 
+                const pyodide = pythonRuntimeService.getPyodide();
+                if (!pyodide) {
+                    throw new Error('Pyodide instance not available.');
+                }
 
-        // Definiere das Python Turtle-Modul, das diese JavaScript-Funktionen aufruft
-        const pythonTurtleModule = `
+                // Erstelle JavaScript-Funktionen, die von Python aufgerufen werden können
+                (globalThis as any).js_turtle_forward = (distance: number) => this.forward(distance);
+                (globalThis as any).js_turtle_backward = (distance: number) => this.backward(distance);
+                (globalThis as any).js_turtle_left = (angle: number) => this.left(angle);
+                (globalThis as any).js_turtle_right = (angle: number) => this.right(angle);
+                (globalThis as any).js_turtle_penup = () => this.penup();
+                (globalThis as any).js_turtle_pendown = () => this.pendown();
+                (globalThis as any).js_turtle_goto = (x: number, y: number) => this.goto(x, y);
+                (globalThis as any).js_turtle_pencolor = (color: string) => this.pencolor(color);
+                (globalThis as any).js_turtle_setheading = (angle: number) => this.setheading(angle);
+                (globalThis as any).js_turtle_speed = (speed: number) => this.setAnimationSpeed(speed);
+
+                // Definiere das Python Turtle-Modul, das diese JavaScript-Funktionen aufruft
+                const pythonTurtleModule = `
 import js
 
 class Turtle:
@@ -147,27 +190,80 @@ seth = setheading
 print("Custom Python turtle module loaded and initialized.")
 `;
 
-        try {
-            // Lade das 'js'-Modul, das für die Kommunikation zwischen Python und JS benötigt wird
-            await pyodide.loadPackage('micropip');
-            const micropip = pyodide.pyimport('micropip');
-            await micropip.install('js'); // Stellt sicher, dass das js-Modul verfügbar ist
+                // Prüfe, ob das Turtle-Modul im Cache existiert
+                const isTurtleModuleCached = this.checkTurtleModuleCache();
 
-            // Erstelle das Turtle-Modul in Pyodide
-            // JavaScript-Strings sind intern UTF-16, aber Pyodide behandelt sie beim Schreiben in der Regel korrekt als UTF-8 für Python-Dateien.
-            pyodide.FS.writeFile('/lib/python3.11/site-packages/turtle.py', pythonTurtleModule);
-            console.log('Python turtle module written to Pyodide FS.');
+                if (!isTurtleModuleCached) {
+                    console.log('Installing Turtle module dependencies...');
 
-            // Importiere das Modul, um sicherzustellen, dass es geladen wird
-            // Dies ist nicht unbedingt notwendig, wenn Code es explizit importiert,
-            // aber es hilft, Fehler frühzeitig zu erkennen.
-            await pyodide.runPythonAsync(`
-import turtle
-print("Python turtle module successfully imported in Pyodide.")
-      `);
-        } catch (error) {
-            console.error('Error setting up Python turtle module:', error);
-        }
+                    // Lade das 'js'-Modul, das für die Kommunikation zwischen Python und JS benötigt wird
+                    // Wir optimieren dies durch asynchrone Ausführung und bessere Fehlerbehandlung
+                    try {
+                        // Prüfen, ob micropip bereits installiert ist
+                        const micropipInstalled = await pyodide.runPythonAsync(`
+                            import sys
+                            "micropip" in sys.modules
+                        `);
+
+                        if (!micropipInstalled) {
+                            await pyodide.loadPackage('micropip');
+                        }
+
+                        const micropip = pyodide.pyimport('micropip');
+
+                        // Prüfen, ob js-Modul bereits installiert ist
+                        const jsModuleInstalled = await pyodide.runPythonAsync(`
+                            import sys
+                            "js" in sys.modules
+                        `);
+
+                        if (!jsModuleInstalled) {
+                            await micropip.install('js');
+                        }
+                    } catch (error) {
+                        console.error('Error installing dependencies:', error);
+                        throw new Error(`Failed to install dependencies: ${error}`);
+                    }
+
+                    // Speichere das Turtle-Modul im Pyodide-Dateisystem
+                    try {
+                        // Erstelle das Turtle-Modul in Pyodide
+                        pyodide.FS.writeFile('/lib/python3.11/site-packages/turtle.py', pythonTurtleModule);
+                        console.log('Python turtle module written to Pyodide FS.');
+
+                        // Cache das Modul
+                        this.cacheTurtleModule();
+
+                        // Importiere das Modul, um sicherzustellen, dass es geladen wird
+                        await pyodide.runPythonAsync(`
+                            import turtle
+                            print("Python turtle module successfully imported in Pyodide.")
+                        `);
+                    } catch (error) {
+                        console.error('Error setting up Python turtle module:', error);
+                        throw new Error(`Failed to set up Python turtle module: ${error}`);
+                    }
+                } else {
+                    console.log('Turtle module already cached, skipping installation.');
+
+                    // Importiere das Modul, um sicherzustellen, dass es verfügbar ist
+                    await pyodide.runPythonAsync(`
+                        import turtle
+                        print("Cached Python turtle module successfully imported.")
+                    `);
+                }
+
+                resolve();
+            } catch (error) {
+                console.error('Error in TurtleService initialization:', error);
+                reject(error);
+            } finally {
+                this.isInitializing = false;
+                this.initPromise = null;
+            }
+        });
+
+        return this.initPromise;
     }
 
     public registerDrawCallback(callback: TurtleDrawCallback): void {
@@ -247,7 +343,6 @@ print("Python turtle module successfully imported in Pyodide.")
         this.turtleState.angle = angle % 360;
         this.executeDrawCommand({ command: 'rotate', args: [this.turtleState.angle] }); // Optional
     }
-
 
     public reset(): void {
         console.log('TurtleService: reset()');
