@@ -212,3 +212,5 @@ Beiträge sind willkommen! Bitte lies zunächst die Mitwirkungsrichtlinien.
 ## Lizenz
 
 Dieses Projekt ist unter der MIT-Lizenz lizenziert - siehe die LICENSE-Datei für Details.
+
+<!-- Trigger build -->
