@@ -5,7 +5,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite",
-		"build": "run-p type-check \"build-only {@}\" --",
+		"build": "npx run-p type-check \"build-only {@}\" --",
 		"preview": "npm run build && wrangler dev",
 		"build-only": "vite build",
 		"build-analyze": "ANALYZE=true vite build",
@@ -27,7 +27,7 @@
 		"vue": "^3.5.13",
 		"vue-router": "^4.5.0",
 		"workbox-window": "^7.0.0",
-		"npm-run-all2": "^7.0.2"
+		"npm-run-all": "^4.1.5"
 	},
 	"devDependencies": {
 		"@cloudflare/vite-plugin": "^1.1.1",
