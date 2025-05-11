@@ -1,6 +1,6 @@
 # Python Turtle im Browser
 
-Eine moderne Webanwendung zur Ausführung von Python-Turtle-Code direkt im Browser. Gebaut mit Vue 3, TypeScript und Pyodide, optimiert für Cloudflare Pages.
+Eine moderne Webanwendung zur Ausführung von Python-Turtle-Code direkt im Browser. Gebaut mit Vue 3, TypeScript und Pyodide, optimiert für Cloudflare Pages. :)
 
 ![Python Turtle im Browser](https://via.placeholder.com/800x400?text=Python+Turtle+im+Browser)
 
